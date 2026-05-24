@@ -246,20 +246,17 @@
 
 <script>
 (() => {
-  // ---------- Touch zoom guards (iOS Safari ignores user-scalable=no for gestures) ----------
+  // ---------- Touch zoom guards ----------
+  // touch-action: manipulation in CSS + viewport meta already kill the
+  // double-tap-to-zoom in all modern mobile browsers. We DON'T touch
+  // touchend here, because doing so was eating the second tap (e.g. the
+  // first answer click landing within 350ms of pressing 開始遊戲).
+  // Only block the pinch / iOS-specific gesture events.
   ['gesturestart', 'gesturechange', 'gestureend'].forEach(ev => {
     document.addEventListener(ev, e => e.preventDefault(), { passive: false });
   });
-  // double-tap zoom fallback: swallow any 2nd touchend that arrives within 350ms
-  let _lastTouchEnd = 0;
-  document.addEventListener('touchend', e => {
-    const now = Date.now();
-    if (now - _lastTouchEnd <= 350) e.preventDefault();
-    _lastTouchEnd = now;
-  }, { passive: false });
-  // pinch with two fingers
   document.addEventListener('touchmove', e => {
-    if (e.touches.length > 1) e.preventDefault();
+    if (e.touches.length > 1) e.preventDefault();   // two-finger pinch
   }, { passive: false });
 
   // ---------- Canvas setup ----------
@@ -495,8 +492,15 @@
     speechSynthesis.onvoiceschanged = () => { _zhVoice = pickZhVoice(); };
     _zhVoice = pickZhVoice();
   }
+  // throttle: ignore repeat speech of the same character within 1.5s
+  let _lastSpeakChar = '';
+  let _lastSpeakAt = 0;
   function speakChar(text) {
     if (muted || !('speechSynthesis' in window)) return;
+    const now = Date.now();
+    if (text === _lastSpeakChar && now - _lastSpeakAt < 1500) return;
+    _lastSpeakChar = text;
+    _lastSpeakAt = now;
     try { speechSynthesis.cancel(); } catch (e) {}
     const utt = new SpeechSynthesisUtterance(text);
     utt.lang = 'zh-TW';
@@ -507,6 +511,8 @@
     speechSynthesis.speak(utt);
   }
   function stopSpeech() {
+    _lastSpeakChar = '';
+    _lastSpeakAt = 0;
     if ('speechSynthesis' in window) {
       try { speechSynthesis.cancel(); } catch (e) {}
     }
@@ -1467,6 +1473,7 @@
 
   // ---------- Start / End ----------
   function startGame() {
+    if (state.running) return;   // ignore rapid double-taps on 開始遊戲
     ensureAudio();
     state.running = true;
     state.monsters = [];
