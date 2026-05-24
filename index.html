@@ -20,6 +20,7 @@
   #hud .label { font-size: 14px; opacity: .75; font-weight: 500; }
   #hud .unit { font-size: 14px; opacity: .6; font-weight: 500; }
   #timer { color: #22d3ee; font-variant-numeric: tabular-nums; min-width: 70px; }
+  #points { color: #fde047; font-variant-numeric: tabular-nums; font-weight: 800; }
   #timer.warn { color: #f97316; animation: pulse 1s ease-in-out infinite; }
   #timer.danger { color: #ef4444; animation: pulse .5s ease-in-out infinite; }
   @keyframes pulse { 50% { opacity: .5; transform: scale(1.05); } }
@@ -169,9 +170,10 @@
 <div id="app">
   <div id="hud">
     <div class="item"><span class="label">時間</span><span id="timer">100</span><span class="unit">秒</span></div>
-    <div class="item"><span class="label">答對</span><span id="score">0</span><span class="unit">題</span></div>
+    <div class="item"><span class="label">答對</span><span id="kills">0</span><span class="unit">題</span></div>
+    <div class="item"><span class="label">分數</span><span id="points">0</span></div>
     <div class="item"><span class="label">連擊</span><span id="combo">0</span></div>
-    <div class="item"><span class="label">最高</span><span id="best">0</span><span class="unit">題</span></div>
+    <div class="item"><span class="label">最高</span><span id="best">0</span><span class="unit">分</span></div>
     <button id="muteBtn" title="靜音">🔊</button>
     <button id="endBtn" title="結束遊戲看成績">🏁 結束</button>
   </div>
@@ -211,11 +213,12 @@
     <div class="overlay hidden" id="overScreen">
       <h1>時間到！</h1>
       <div class="new-record hidden" id="newRecord">🏆 打破紀錄！</div>
-      <div class="result-label">本次答對</div>
+      <div class="result-label">本次分數</div>
       <div class="final-score" id="finalScore">0</div>
-      <div class="result-label">題</div>
-      <div class="stat-line" style="margin-top: 24px;">最高紀錄 <span id="statBest" style="color:#fde047;font-weight:800;">0</span> 題</div>
+      <div class="result-label">分</div>
+      <div class="stat-line" style="margin-top: 24px;">答對 <span id="statKills">0</span> 題</div>
       <div class="stat-line">最高連擊 <span id="statCombo">0</span> 次</div>
+      <div class="stat-line">最高紀錄 <span id="statBest" style="color:#fde047;font-weight:800;">0</span> 分</div>
       <button class="start-btn" id="restartBtn" style="margin-top:30px;">再玩一次</button>
     </div>
   </div>
@@ -266,6 +269,95 @@
     hurt()    { beep(150, 0.4, 'sawtooth', 0.2); },
   };
 
+  // ---------- Background music (procedural, no asset files) ----------
+  const music = {
+    scheduler: null,
+    beat: 0,
+    bpm: 96,
+    urgent: false,
+
+    start() {
+      this.stop();
+      this.beat = 0;
+      this.urgent = false;
+      this.bpm = 96;
+      this._schedule();
+    },
+    stop() {
+      if (this.scheduler) { clearInterval(this.scheduler); this.scheduler = null; }
+    },
+    setUrgent(u) {
+      if (this.urgent === u) return;
+      this.urgent = u;
+      this.bpm = u ? 150 : 96;
+      if (this.scheduler) this._schedule();
+    },
+    _schedule() {
+      if (this.scheduler) clearInterval(this.scheduler);
+      const ms = (60000 / this.bpm) / 2;   // 8th-note cadence
+      this.scheduler = setInterval(() => this._tick(), ms);
+    },
+    _tick() {
+      if (muted || !audioCtx) return;
+      // 16-step patterns. urgent uses A minor + driving kick, calm uses C major arpeggio
+      const pat = this.urgent ? {
+        melody: [659, 0, 784, 0, 880, 0, 988,1047, 880, 0, 988, 0, 880, 0, 784, 0],
+        bass:   [220, 0, 0, 0, 165, 0, 0, 0, 220, 0, 0, 0, 196, 0, 0, 0],
+        kick:   [1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0],
+        snare:  [0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0],
+      } : {
+        melody: [523, 0, 659, 0, 784, 0, 659, 0, 587, 0, 698, 0, 880, 0, 698, 0],
+        bass:   [131, 0, 0, 0, 196, 0, 0, 0, 220, 0, 0, 0, 175, 0, 0, 0],
+        kick:   [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0],
+        snare:  [0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0],
+      };
+      const i = this.beat % 16;
+      if (pat.melody[i]) this._tone(pat.melody[i], this.urgent ? 0.10 : 0.13, 'triangle', this.urgent ? 0.055 : 0.045);
+      if (pat.bass[i])   this._tone(pat.bass[i],   0.22, 'sine',     0.07);
+      if (pat.kick[i])   this._kick();
+      if (pat.snare[i])  this._snare();
+      this.beat++;
+    },
+    _tone(freq, dur, type, vol) {
+      const t = audioCtx.currentTime;
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = type; osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0, t);
+      gain.gain.linearRampToValueAtTime(vol, t + 0.005);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + dur);
+      osc.connect(gain); gain.connect(audioCtx.destination);
+      osc.start(t); osc.stop(t + dur);
+    },
+    _kick() {
+      const t = audioCtx.currentTime;
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(110, t);
+      osc.frequency.exponentialRampToValueAtTime(35, t + 0.10);
+      gain.gain.setValueAtTime(this.urgent ? 0.22 : 0.16, t);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.18);
+      osc.connect(gain); gain.connect(audioCtx.destination);
+      osc.start(t); osc.stop(t + 0.2);
+    },
+    _snare() {
+      const t = audioCtx.currentTime;
+      // short noise burst
+      const len = 0.1;
+      const buffer = audioCtx.createBuffer(1, audioCtx.sampleRate * len, audioCtx.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < data.length; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / data.length);
+      const src = audioCtx.createBufferSource();
+      src.buffer = buffer;
+      const gain = audioCtx.createGain();
+      gain.gain.setValueAtTime(this.urgent ? 0.12 : 0.07, t);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + len);
+      src.connect(gain); gain.connect(audioCtx.destination);
+      src.start(t);
+    }
+  };
+
   document.getElementById('muteBtn').addEventListener('click', e => {
     muted = !muted;
     e.currentTarget.textContent = muted ? '🔇' : '🔊';
@@ -277,7 +369,11 @@
   // ---------- Game state ----------
   const TOTAL_TIME = 100;       // seconds per game
   const MONSTER_FALL_TIME = 10; // seconds for monster to fall from top to bottom
-  const BEST_KEY = 'mathShooter.best';
+  const BEST_KEY = 'mathShooter.bestScore';
+  // scoring
+  const BASE_POINTS  = 10;      // every correct answer
+  const SPEED_WINDOW = 10;      // seconds; faster = bigger speed bonus
+  const WRONG_PENALTY = 5;      // points deducted per wrong answer
 
   const state = {
     running: false,
@@ -285,10 +381,11 @@
     projectiles: [],
     particles: [],
     floats: [],
-    kills: 0,              // primary score = correct answers
+    kills: 0,              // count of correct answers
+    score: 0,              // accumulated points (with bonuses)
     combo: 0,
     maxCombo: 0,
-    bestKills: 0,          // loaded from localStorage
+    bestScore: 0,          // best score from localStorage
     timeLeft: TOTAL_TIME,  // seconds remaining
     operations: ['+', '-', '×'],
     difficulty: 'normal',
@@ -300,12 +397,20 @@
 
   function loadBest() {
     const v = parseInt(localStorage.getItem(BEST_KEY) || '0', 10);
-    state.bestKills = isNaN(v) ? 0 : v;
+    state.bestScore = isNaN(v) ? 0 : v;
   }
   function saveBest() {
-    localStorage.setItem(BEST_KEY, String(state.bestKills));
+    localStorage.setItem(BEST_KEY, String(state.bestScore));
   }
   loadBest();
+
+  // Score calculation. Returns { points, speedBonus, comboMult }.
+  function scoreFor(elapsedSec, comboAfter) {
+    const speedBonus = Math.max(0, Math.round(SPEED_WINDOW - elapsedSec));
+    const comboMult  = Math.min(3, 1 + Math.max(0, comboAfter - 1) * 0.2);
+    const points = Math.round((BASE_POINTS + speedBonus) * comboMult);
+    return { points, speedBonus, comboMult };
+  }
 
   const MONSTER_EMOJIS = ['👾','👹','👺','👻','👽','🤖','🐲','🦠','🎃','😈'];
   const CANNON_Y_OFFSET = 80; // distance of cannon base from bottom of canvas
@@ -385,6 +490,7 @@
       wobble: Math.random() * Math.PI * 2,
       alive: true,
       stuck: false, // becomes true once it reaches ground
+      spawnTime: performance.now(),
     };
     state.monsters.push(m);
     pickTarget();
@@ -459,7 +565,19 @@
     state.kills++;
     state.combo++;
     state.maxCombo = Math.max(state.maxCombo, state.combo);
-    state.floats.push({ x: m.x, y: m.y, text: '+1', age: 0, life: 1, color: '#4ade80' });
+
+    // score calculation
+    const elapsed = (performance.now() - (m.spawnTime || performance.now())) / 1000;
+    const { points, speedBonus, comboMult } = scoreFor(elapsed, state.combo);
+    state.score += points;
+    state.floats.push({
+      x: m.x, y: Math.max(100, m.y),
+      text: `+${points}`,
+      sub: speedBonus > 0 || comboMult > 1
+        ? `速度+${speedBonus} × 連擊×${comboMult.toFixed(1)}`
+        : null,
+      age: 0, life: 1.4, color: '#4ade80',
+    });
 
     // combo flash
     if (state.combo >= 3) {
@@ -476,9 +594,10 @@
 
   // ---------- HUD ----------
   function updateHUD() {
-    document.getElementById('score').textContent = state.kills;
-    document.getElementById('combo').textContent = state.combo;
-    document.getElementById('best').textContent = state.bestKills;
+    document.getElementById('kills').textContent  = state.kills;
+    document.getElementById('points').textContent = state.score;
+    document.getElementById('combo').textContent  = state.combo;
+    document.getElementById('best').textContent   = state.bestScore;
     const t = Math.max(0, Math.ceil(state.timeLeft));
     const timerEl = document.getElementById('timer');
     timerEl.textContent = t;
@@ -505,6 +624,15 @@
         btn.classList.add('wrong');
         sfx.wrong();
         state.combo = 0;
+        const before = state.score;
+        state.score = Math.max(0, state.score - WRONG_PENALTY);
+        const actualLoss = before - state.score;
+        // floating "-N" near the cannon area
+        state.floats.push({
+          x: W / 2, y: H - CANNON_Y_OFFSET - 60,
+          text: `-${actualLoss}`,
+          age: 0, life: 1.2, color: '#ef4444',
+        });
         updateHUD();
         setTimeout(() => btn.classList.remove('wrong'), 350);
       }
@@ -530,6 +658,8 @@
       endGame();
       return;
     }
+    // music urgency once time drops to 30s
+    music.setUrgent(state.timeLeft <= 30);
     // update timer display roughly each frame (cheap)
     updateHUD();
 
@@ -1016,11 +1146,21 @@
       const a = 1 - f.age / f.life;
       ctx.globalAlpha = a;
       ctx.fillStyle = f.color;
-      ctx.font = 'bold 28px system-ui';
+      ctx.font = 'bold 34px system-ui';
       ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.shadowColor = f.color;
+      ctx.shadowBlur = 10;
       ctx.fillText(f.text, f.x, f.y);
+      ctx.shadowBlur = 0;
+      if (f.sub) {
+        ctx.font = 'bold 14px system-ui';
+        ctx.fillStyle = '#fff';
+        ctx.fillText(f.sub, f.x, f.y + 24);
+      }
     }
     ctx.globalAlpha = 1;
+    ctx.textBaseline = 'alphabetic';
   }
 
   // ---------- Start / End ----------
@@ -1032,6 +1172,7 @@
     state.particles = [];
     state.floats = [];
     state.kills = 0;
+    state.score = 0;
     state.combo = 0;
     state.maxCombo = 0;
     state.timeLeft = TOTAL_TIME;
@@ -1043,6 +1184,7 @@
     document.getElementById('endBtn').disabled = false;
     updateHUD();
     spawnMonster();
+    music.start();
 
     state.lastTime = performance.now();
     requestAnimationFrame(loop);
@@ -1051,20 +1193,22 @@
   function endGame() {
     if (!state.running) return;
     state.running = false;
+    music.stop();
     sfx.lose();
 
-    // high score handling
-    const isNew = state.kills > state.bestKills;
+    // high score handling (best = total score)
+    const isNew = state.score > state.bestScore;
     if (isNew) {
-      state.bestKills = state.kills;
+      state.bestScore = state.score;
       saveBest();
     }
     updateHUD();
 
-    document.getElementById('finalScore').textContent = state.kills;
-    document.getElementById('statBest').textContent = state.bestKills;
-    document.getElementById('statCombo').textContent = state.maxCombo;
-    document.getElementById('newRecord').classList.toggle('hidden', !isNew || state.kills === 0);
+    document.getElementById('finalScore').textContent = state.score;
+    document.getElementById('statKills').textContent  = state.kills;
+    document.getElementById('statBest').textContent   = state.bestScore;
+    document.getElementById('statCombo').textContent  = state.maxCombo;
+    document.getElementById('newRecord').classList.toggle('hidden', !isNew || state.score === 0);
     document.getElementById('overScreen').classList.remove('hidden');
     document.getElementById('endBtn').disabled = true;
   }
