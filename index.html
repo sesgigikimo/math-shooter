@@ -267,29 +267,62 @@
     boom()    { beep(120, 0.3, 'triangle', 0.25); beep(80, 0.4, 'sine', 0.2); },
     lose()    { beep(400, 0.2, 'sine', 0.18); setTimeout(() => beep(300, 0.3, 'sine', 0.18), 150); },
     hurt()    { beep(150, 0.4, 'sawtooth', 0.2); },
+    // crowd applause: many short bandpass noise bursts + cheer fanfare on top
+    applause() {
+      if (muted || !audioCtx) return;
+      const t0 = audioCtx.currentTime;
+      const DURATION = 2.2;
+      const N_CLAPS = 90;
+      for (let i = 0; i < N_CLAPS; i++) {
+        const t = t0 + (i / N_CLAPS) * DURATION + Math.random() * 0.04;
+        const len = 0.03 + Math.random() * 0.04;
+        const buf = audioCtx.createBuffer(1, Math.max(1, audioCtx.sampleRate * len), audioCtx.sampleRate);
+        const data = buf.getChannelData(0);
+        for (let j = 0; j < data.length; j++) data[j] = (Math.random() * 2 - 1) * (1 - j / data.length);
+        const src = audioCtx.createBufferSource(); src.buffer = buf;
+        const bp = audioCtx.createBiquadFilter();
+        bp.type = 'bandpass';
+        bp.frequency.value = 1500 + Math.random() * 3000;
+        bp.Q.value = 1.8;
+        const env = audioCtx.createGain();
+        const vol = 0.04 + Math.random() * 0.07;
+        env.gain.setValueAtTime(vol, t);
+        env.gain.exponentialRampToValueAtTime(0.001, t + len);
+        src.connect(bp); bp.connect(env); env.connect(audioCtx.destination);
+        src.start(t);
+      }
+      // cheer fanfare: C major arpeggio rising
+      [523, 659, 784, 1047, 1319].forEach((freq, i) => {
+        setTimeout(() => beep(freq, 0.32, 'triangle', 0.18), i * 110);
+      });
+    },
   };
 
-  // ---------- Background music (procedural, no asset files) ----------
+  // ---------- Background music (sci-fi synthwave, procedural) ----------
+  // Three intensity tiers driven by remaining time:
+  //   normal (100s..30s): 150 BPM
+  //   fast   (30s..10s):  180 BPM
+  //   panic  (10s..0s):   220 BPM
   const music = {
     scheduler: null,
     beat: 0,
-    bpm: 96,
-    urgent: false,
+    level: 'normal',
+    bpm: 150,
 
     start() {
       this.stop();
       this.beat = 0;
-      this.urgent = false;
-      this.bpm = 96;
+      this.level = 'normal';
+      this.bpm = 150;
       this._schedule();
     },
     stop() {
       if (this.scheduler) { clearInterval(this.scheduler); this.scheduler = null; }
     },
-    setUrgent(u) {
-      if (this.urgent === u) return;
-      this.urgent = u;
-      this.bpm = u ? 150 : 96;
+    setLevel(lvl) {
+      if (this.level === lvl) return;
+      this.level = lvl;
+      this.bpm = lvl === 'panic' ? 220 : lvl === 'fast' ? 180 : 150;
       if (this.scheduler) this._schedule();
     },
     _schedule() {
@@ -299,61 +332,119 @@
     },
     _tick() {
       if (muted || !audioCtx) return;
-      // 16-step patterns. urgent uses A minor + driving kick, calm uses C major arpeggio
-      const pat = this.urgent ? {
-        melody: [659, 0, 784, 0, 880, 0, 988,1047, 880, 0, 988, 0, 880, 0, 784, 0],
-        bass:   [220, 0, 0, 0, 165, 0, 0, 0, 220, 0, 0, 0, 196, 0, 0, 0],
-        kick:   [1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0],
-        snare:  [0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0],
-      } : {
-        melody: [523, 0, 659, 0, 784, 0, 659, 0, 587, 0, 698, 0, 880, 0, 698, 0],
-        bass:   [131, 0, 0, 0, 196, 0, 0, 0, 220, 0, 0, 0, 175, 0, 0, 0],
-        kick:   [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0],
-        snare:  [0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0],
-      };
+
+      // A minor synthwave riff — 16-step pattern, denser as level rises.
+      // Notes: A4=440 B4=494 C5=523 D5=587 E5=659 F5=698 G5=784 A5=880 B5=988
+      //        A2=110 E2=82  F2=87  G2=98
+      const N = { A4:440, B4:494, C5:523, D5:587, E5:659, F5:698, G5:784, A5:880, B5:988, C6:1047 };
+      const lead = [
+        N.A4, 0, N.E5, 0, N.A5, 0, N.E5, N.G5,
+        N.F5, 0, N.C5, 0, N.A4, 0, N.E5, N.A5,
+      ];
+      const bass = [
+        110, 0, 0, 0, 110, 0, 0, 110,
+        87,  0, 0, 0, 98,  0, 0, 98,
+      ];
+      const kick = [1,0,0,0, 1,0,0,0, 1,0,0,0, 1,0,0,0];
+      const hat  = [0,1,0,1, 0,1,0,1, 0,1,0,1, 0,1,0,1];
+
       const i = this.beat % 16;
-      if (pat.melody[i]) this._tone(pat.melody[i], this.urgent ? 0.10 : 0.13, 'triangle', this.urgent ? 0.055 : 0.045);
-      if (pat.bass[i])   this._tone(pat.bass[i],   0.22, 'sine',     0.07);
-      if (pat.kick[i])   this._kick();
-      if (pat.snare[i])  this._snare();
+
+      if (lead[i]) this._lead(lead[i], this.level === 'panic' ? 0.10 : 0.16);
+      if (bass[i]) this._bass(bass[i], this.level === 'panic' ? 0.18 : 0.24);
+      if (kick[i]) this._kick();
+      if (hat[i])  this._hat();
+
+      // panic adds extra off-beat snare + lead doubling
+      if (this.level === 'panic') {
+        if (i % 4 === 2) this._snare();
+        if (i % 2 === 1 && lead[(i + 15) % 16]) this._hat();
+      } else if (this.level === 'fast') {
+        if (i === 4 || i === 12) this._snare();
+      }
+
       this.beat++;
     },
-    _tone(freq, dur, type, vol) {
+
+    // sci-fi lead: detuned dual sawtooth through resonant lowpass
+    _lead(freq, dur) {
       const t = audioCtx.currentTime;
-      const osc = audioCtx.createOscillator();
-      const gain = audioCtx.createGain();
-      osc.type = type; osc.frequency.value = freq;
-      gain.gain.setValueAtTime(0, t);
-      gain.gain.linearRampToValueAtTime(vol, t + 0.005);
-      gain.gain.exponentialRampToValueAtTime(0.001, t + dur);
-      osc.connect(gain); gain.connect(audioCtx.destination);
-      osc.start(t); osc.stop(t + dur);
+      const sum = audioCtx.createGain();
+      sum.gain.value = 0.035;
+      for (const det of [-9, 9]) {
+        const osc = audioCtx.createOscillator();
+        osc.type = 'sawtooth';
+        osc.frequency.value = freq;
+        osc.detune.value = det;
+        const filt = audioCtx.createBiquadFilter();
+        filt.type = 'lowpass';
+        filt.frequency.setValueAtTime(freq * 8, t);
+        filt.frequency.exponentialRampToValueAtTime(freq * 2, t + dur);
+        filt.Q.value = 8;
+        const env = audioCtx.createGain();
+        env.gain.setValueAtTime(0, t);
+        env.gain.linearRampToValueAtTime(1, t + 0.008);
+        env.gain.exponentialRampToValueAtTime(0.001, t + dur);
+        osc.connect(filt); filt.connect(env); env.connect(sum);
+        osc.start(t); osc.stop(t + dur);
+      }
+      sum.connect(audioCtx.destination);
     },
+
+    // sub bass: sine fundamental + soft 2nd harmonic
+    _bass(freq, dur) {
+      const t = audioCtx.currentTime;
+      const env = audioCtx.createGain();
+      env.gain.setValueAtTime(0.085, t);
+      env.gain.exponentialRampToValueAtTime(0.001, t + dur);
+      const o1 = audioCtx.createOscillator(); o1.type = 'sine';     o1.frequency.value = freq;
+      const o2 = audioCtx.createOscillator(); o2.type = 'triangle'; o2.frequency.value = freq * 2;
+      const m2 = audioCtx.createGain(); m2.gain.value = 0.3;
+      o1.connect(env); o2.connect(m2); m2.connect(env); env.connect(audioCtx.destination);
+      o1.start(t); o1.stop(t + dur);
+      o2.start(t); o2.stop(t + dur);
+    },
+
     _kick() {
       const t = audioCtx.currentTime;
       const osc = audioCtx.createOscillator();
-      const gain = audioCtx.createGain();
       osc.type = 'sine';
-      osc.frequency.setValueAtTime(110, t);
-      osc.frequency.exponentialRampToValueAtTime(35, t + 0.10);
-      gain.gain.setValueAtTime(this.urgent ? 0.22 : 0.16, t);
-      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.18);
-      osc.connect(gain); gain.connect(audioCtx.destination);
+      osc.frequency.setValueAtTime(130, t);
+      osc.frequency.exponentialRampToValueAtTime(36, t + 0.10);
+      const env = audioCtx.createGain();
+      env.gain.setValueAtTime(this.level === 'normal' ? 0.22 : 0.28, t);
+      env.gain.exponentialRampToValueAtTime(0.001, t + 0.18);
+      osc.connect(env); env.connect(audioCtx.destination);
       osc.start(t); osc.stop(t + 0.2);
     },
+
+    _hat() {
+      const t = audioCtx.currentTime;
+      const len = 0.035;
+      const buf = audioCtx.createBuffer(1, audioCtx.sampleRate * len, audioCtx.sampleRate);
+      const data = buf.getChannelData(0);
+      for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+      const src = audioCtx.createBufferSource(); src.buffer = buf;
+      const hp = audioCtx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 7000;
+      const env = audioCtx.createGain();
+      env.gain.setValueAtTime(this.level === 'panic' ? 0.06 : 0.04, t);
+      env.gain.exponentialRampToValueAtTime(0.001, t + len);
+      src.connect(hp); hp.connect(env); env.connect(audioCtx.destination);
+      src.start(t);
+    },
+
     _snare() {
       const t = audioCtx.currentTime;
-      // short noise burst
-      const len = 0.1;
-      const buffer = audioCtx.createBuffer(1, audioCtx.sampleRate * len, audioCtx.sampleRate);
-      const data = buffer.getChannelData(0);
+      const len = 0.12;
+      const buf = audioCtx.createBuffer(1, audioCtx.sampleRate * len, audioCtx.sampleRate);
+      const data = buf.getChannelData(0);
       for (let i = 0; i < data.length; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / data.length);
-      const src = audioCtx.createBufferSource();
-      src.buffer = buffer;
-      const gain = audioCtx.createGain();
-      gain.gain.setValueAtTime(this.urgent ? 0.12 : 0.07, t);
-      gain.gain.exponentialRampToValueAtTime(0.001, t + len);
-      src.connect(gain); gain.connect(audioCtx.destination);
+      const src = audioCtx.createBufferSource(); src.buffer = buf;
+      const bp = audioCtx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 1800; bp.Q.value = 1.2;
+      const env = audioCtx.createGain();
+      env.gain.setValueAtTime(0.12, t);
+      env.gain.exponentialRampToValueAtTime(0.001, t + len);
+      src.connect(bp); bp.connect(env); env.connect(audioCtx.destination);
       src.start(t);
     }
   };
@@ -635,6 +726,10 @@
         });
         updateHUD();
         setTimeout(() => btn.classList.remove('wrong'), 350);
+        // game over if this deduction zeroed out the score
+        if (before > 0 && state.score === 0) {
+          setTimeout(() => endGame('depleted'), 600);
+        }
       }
     });
   });
@@ -658,8 +753,11 @@
       endGame();
       return;
     }
-    // music urgency once time drops to 30s
-    music.setUrgent(state.timeLeft <= 30);
+    // three music tiers: normal → fast (30s) → panic (10s)
+    music.setLevel(
+      state.timeLeft <= 10 ? 'panic' :
+      state.timeLeft <= 30 ? 'fast'  : 'normal'
+    );
     // update timer display roughly each frame (cheap)
     updateHUD();
 
@@ -1190,25 +1288,30 @@
     requestAnimationFrame(loop);
   }
 
-  function endGame() {
+  function endGame(reason) {
     if (!state.running) return;
     state.running = false;
     music.stop();
-    sfx.lose();
 
     // high score handling (best = total score)
-    const isNew = state.score > state.bestScore;
+    const isNew = state.score > 0 && state.score > state.bestScore;
     if (isNew) {
       state.bestScore = state.score;
       saveBest();
     }
     updateHUD();
 
+    // play applause for new record, otherwise the usual game-end tone
+    if (isNew) setTimeout(() => sfx.applause(), 280);
+    else       sfx.lose();
+
+    const title = reason === 'depleted' ? '💥 分數歸零！' : '⏰ 時間到！';
+    document.querySelector('#overScreen h1').textContent = title;
     document.getElementById('finalScore').textContent = state.score;
     document.getElementById('statKills').textContent  = state.kills;
     document.getElementById('statBest').textContent   = state.bestScore;
     document.getElementById('statCombo').textContent  = state.maxCombo;
-    document.getElementById('newRecord').classList.toggle('hidden', !isNew || state.score === 0);
+    document.getElementById('newRecord').classList.toggle('hidden', !isNew);
     document.getElementById('overScreen').classList.remove('hidden');
     document.getElementById('endBtn').disabled = true;
   }
