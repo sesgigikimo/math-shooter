@@ -464,7 +464,8 @@
   // scoring
   const BASE_POINTS  = 10;      // every correct answer
   const SPEED_WINDOW = 10;      // seconds; faster = bigger speed bonus
-  const WRONG_PENALTY = 5;      // points deducted per wrong answer
+  const WRONG_PENALTY = 5;      // base deduction per wrong answer
+  const WRONG_STREAK_CAP = 4;   // max multiplier on consecutive wrongs
 
   const state = {
     running: false,
@@ -476,6 +477,7 @@
     score: 0,              // accumulated points (with bonuses)
     combo: 0,
     maxCombo: 0,
+    wrongStreak: 0,        // consecutive wrong answers (escalating penalty)
     bestScore: 0,          // best score from localStorage
     timeLeft: TOTAL_TIME,  // seconds remaining
     operations: ['+', '-', '×'],
@@ -655,6 +657,7 @@
     sfx.boom();
     state.kills++;
     state.combo++;
+    state.wrongStreak = 0;
     state.maxCombo = Math.max(state.maxCombo, state.combo);
 
     // score calculation
@@ -715,14 +718,22 @@
         btn.classList.add('wrong');
         sfx.wrong();
         state.combo = 0;
-        const before = state.score;
-        state.score = Math.max(0, state.score - WRONG_PENALTY);
+        state.wrongStreak++;
+        const mult    = Math.min(state.wrongStreak, WRONG_STREAK_CAP);
+        const penalty = WRONG_PENALTY * mult;
+        const before  = state.score;
+        state.score   = Math.max(0, state.score - penalty);
         const actualLoss = before - state.score;
-        // floating "-N" near the cannon area
+        // floating "-N" near the cannon area; show streak from 2nd onwards
         state.floats.push({
           x: W / 2, y: H - CANNON_Y_OFFSET - 60,
           text: `-${actualLoss}`,
-          age: 0, life: 1.2, color: '#ef4444',
+          sub: state.wrongStreak >= 2
+            ? (state.wrongStreak >= WRONG_STREAK_CAP
+                ? `連錯 ${state.wrongStreak} 次（已達上限 ×${WRONG_STREAK_CAP}）`
+                : `連錯 ${state.wrongStreak} 次 ×${mult}`)
+            : null,
+          age: 0, life: 1.4, color: '#ef4444',
         });
         updateHUD();
         setTimeout(() => btn.classList.remove('wrong'), 350);
@@ -1273,6 +1284,7 @@
     state.score = 0;
     state.combo = 0;
     state.maxCombo = 0;
+    state.wrongStreak = 0;
     state.timeLeft = TOTAL_TIME;
 
     if (state.operations.length === 0) state.operations = ['+'];
