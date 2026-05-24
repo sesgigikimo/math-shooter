@@ -78,6 +78,7 @@
     font-family: inherit;
   }
   .ans-btn:active { transform: translateY(4px); box-shadow: 0 2px 0 #b45309, 0 4px 8px rgba(0,0,0,.4); }
+  .ans-btn.long { font-size: 30px; }
   .ans-btn.correct { background: linear-gradient(180deg, #4ade80 0%, #16a34a 100%); color: #052e16; box-shadow: 0 6px 0 #14532d, 0 8px 16px rgba(0,0,0,.4); }
   .ans-btn.wrong { background: linear-gradient(180deg, #f87171 0%, #dc2626 100%); color: #450a0a; box-shadow: 0 6px 0 #7f1d1d, 0 8px 16px rgba(0,0,0,.4); animation: shake .3s; }
   @keyframes shake {
@@ -89,9 +90,17 @@
   /* ===== Overlays (start / game over) ===== */
   .overlay {
     position: absolute; inset: 0; z-index: 10;
-    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    display: flex; flex-direction: column;
+    align-items: center;
+    /* "safe center" keeps content centered when it fits, but flips to
+       flex-start when overflowing so it stays scrollable. */
+    justify-content: safe center;
     background: rgba(11, 16, 38, .92); backdrop-filter: blur(8px);
-    padding: 24px; text-align: center;
+    padding: 24px 16px; text-align: center;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    touch-action: pan-y;            /* allow vertical scroll, kill h-scroll/zoom */
+    overscroll-behavior: contain;
   }
   .overlay.hidden { display: none; }
   .overlay h1 { font-size: 56px; margin-bottom: 8px;
@@ -161,6 +170,43 @@
   @keyframes glow {
     0%, 100% { box-shadow: 0 0 20px rgba(253,224,71,.5); transform: scale(1); }
     50%      { box-shadow: 0 0 40px rgba(253,224,71,.9); transform: scale(1.05); }
+  }
+
+  /* ===== Mobile-responsive ===== */
+  /* phone / short viewport */
+  @media (max-width: 720px), (max-height: 760px) {
+    #hud { font-size: 16px; padding: 6px 10px; gap: 8px; flex-wrap: wrap; }
+    #hud .label, #hud .unit { font-size: 10px; }
+    #hud .item { gap: 4px; }
+    #timer { min-width: 40px; }
+    #muteBtn { width: 32px; height: 32px; font-size: 14px; }
+    #endBtn  { padding: 4px 10px; font-size: 12px; }
+
+    .overlay h1 { font-size: 38px; margin-bottom: 4px; }
+    .overlay .sub { font-size: 14px; margin-bottom: 16px; }
+    .config-group { margin-bottom: 14px; }
+    .config-group .gtitle { font-size: 13px; margin-bottom: 8px; }
+    .chip { padding: 9px 14px; font-size: 15px; gap: 6px; }
+    #opChips .chip::before, #diffChips .chip::before { width: 15px; height: 15px; }
+    .start-btn { padding: 14px 40px; font-size: 22px; letter-spacing: 1px; }
+    .final-score { font-size: 88px; }
+
+    .ans-btn { min-height: 56px; font-size: 30px; border-radius: 14px; }
+    .ans-btn.long { font-size: 22px; }
+    #answers { padding: 10px 8px 16px; gap: 10px; }
+  }
+  /* very small phones */
+  @media (max-width: 400px) {
+    .overlay h1 { font-size: 30px; }
+    .overlay .sub { font-size: 13px; margin-bottom: 12px; }
+    .chip { padding: 8px 12px; font-size: 14px; }
+    .start-btn { padding: 12px 32px; font-size: 20px; }
+    #hud { font-size: 13px; gap: 6px; }
+    #hud .label, #hud .unit { font-size: 9px; }
+    .ans-btn { min-height: 50px; font-size: 26px; }
+    .ans-btn.long { font-size: 20px; }
+    #answers { padding: 8px 6px 14px; gap: 8px; }
+    .final-score { font-size: 72px; }
   }
 
   /* Bouncing combo text on canvas */
@@ -492,13 +538,14 @@
     speechSynthesis.onvoiceschanged = () => { _zhVoice = pickZhVoice(); };
     _zhVoice = pickZhVoice();
   }
-  // throttle: ignore repeat speech of the same character within 1.5s
+  // throttle only stops rapid duplicate calls within 300ms;
+  // the 2-second periodic re-speak loop must still pass through.
   let _lastSpeakChar = '';
   let _lastSpeakAt = 0;
   function speakChar(text) {
     if (muted || !('speechSynthesis' in window)) return;
     const now = Date.now();
-    if (text === _lastSpeakChar && now - _lastSpeakAt < 1500) return;
+    if (text === _lastSpeakChar && now - _lastSpeakAt < 300) return;
     _lastSpeakChar = text;
     _lastSpeakAt = now;
     try { speechSynthesis.cancel(); } catch (e) {}
@@ -759,7 +806,10 @@
     };
     state.monsters.push(m);
     pickTarget();
-    if (prob.op === '注音') speakChar(prob.char);
+    if (prob.op === '注音') {
+      speakChar(prob.char);
+      m.lastSpeakAt = performance.now();
+    }
   }
 
   function pickTarget() {
@@ -787,9 +837,8 @@
     btns.forEach((b, i) => {
       const v = state.choices[i];
       b.textContent = v;
-      // shrink font for long strings (notably 3-zhuyin + tone)
-      const len = String(v).length;
-      b.style.fontSize = len >= 4 ? '30px' : '38px';
+      // long zhuyin (3-symbol + tone) shrinks via .long class
+      b.classList.toggle('long', String(v).length >= 4);
       b.classList.remove('correct', 'wrong');
       b.disabled = state.correctIdx < 0;
     });
@@ -972,6 +1021,15 @@
         }
       }
       m.wobble += dt * (m.stuck ? 6 : 4);
+    }
+
+    // 注音題：怪物還沒被擊中前，每 2 秒重唸一次字音，避免小孩錯過
+    const tgt = state.targetMonster;
+    if (tgt && tgt.alive && !tgt.targeted && tgt.problem.op === '注音') {
+      if (performance.now() - (tgt.lastSpeakAt || 0) >= 2000) {
+        speakChar(tgt.problem.char);
+        tgt.lastSpeakAt = performance.now();
+      }
     }
 
     // projectiles
