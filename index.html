@@ -13,7 +13,9 @@
     touch-action: manipulation;           /* kill the 300ms tap delay + double-tap zoom */
   }
   html, body {
-    height: 100%; font-family: "PingFang TC", "Microsoft JhengHei", system-ui, sans-serif;
+    height: 100%;
+    height: 100dvh;                 /* mobile Safari/Chrome shrinks dvh as URL bar shows */
+    font-family: "PingFang TC", "Microsoft JhengHei", system-ui, sans-serif;
     background: #0b1026; color: #fff;
     overflow: hidden; overscroll-behavior: none;
     touch-action: manipulation;
@@ -21,13 +23,24 @@
   /* lock the game area down completely — no scrolling, no pinch, no double-tap zoom */
   #gameArea, canvas, .ans-btn, .chip, button { touch-action: manipulation; }
 
-  #app { position: relative; width: 100vw; height: 100vh; display: flex; flex-direction: column; }
+  #app {
+    position: relative;
+    width: 100vw; height: 100vh;
+    height: 100dvh;                 /* same dvh override */
+    display: flex; flex-direction: column;
+  }
 
   /* ===== Header ===== */
   #hud {
     display: flex; justify-content: space-between; align-items: center;
-    padding: 10px 20px; background: rgba(0,0,0,.25);
+    padding: 10px 20px;
+    /* leave room for status bar / notch in cover viewport */
+    padding-top: calc(10px + env(safe-area-inset-top));
+    padding-left:  calc(20px + env(safe-area-inset-left));
+    padding-right: calc(20px + env(safe-area-inset-right));
+    background: rgba(0,0,0,.25);
     font-size: 22px; font-weight: 700; letter-spacing: 1px;
+    flex-shrink: 0;                 /* HUD must stay visible */
   }
   #hud .item { display: flex; align-items: baseline; gap: 6px; }
   #hud .label { font-size: 14px; opacity: .75; font-weight: 500; }
@@ -66,7 +79,13 @@
   /* ===== Answer buttons ===== */
   #answers {
     display: flex; justify-content: center; gap: 16px;
-    padding: 18px 12px 24px; background: rgba(0,0,0,.35);
+    padding: 18px 12px 24px;
+    /* never get hidden under the iPhone home indicator */
+    padding-bottom: calc(24px + env(safe-area-inset-bottom));
+    padding-left:   calc(12px + env(safe-area-inset-left));
+    padding-right:  calc(12px + env(safe-area-inset-right));
+    background: rgba(0,0,0,.35);
+    flex-shrink: 0;                 /* buttons must stay visible */
   }
   .ans-btn {
     flex: 1; max-width: 180px; min-height: 70px;
@@ -195,6 +214,16 @@
     .ans-btn.long { font-size: 22px; }
     #answers { padding: 10px 8px 16px; gap: 10px; }
   }
+  /* landscape on phones — height is the bottleneck, shrink aggressively */
+  @media (orientation: landscape) and (max-height: 500px) {
+    #hud { font-size: 13px; padding: 4px 10px; gap: 6px; }
+    #hud .label, #hud .unit { font-size: 9px; }
+    #muteBtn { width: 28px; height: 28px; font-size: 12px; }
+    #endBtn  { padding: 3px 8px; font-size: 11px; }
+    .ans-btn { min-height: 44px; font-size: 24px; border-radius: 12px; }
+    .ans-btn.long { font-size: 18px; }
+    #answers { padding: 6px 8px 10px; gap: 8px; }
+  }
   /* very small phones */
   @media (max-width: 400px) {
     .overlay h1 { font-size: 30px; }
@@ -317,6 +346,11 @@
     ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
   }
   window.addEventListener('resize', resize);
+  window.addEventListener('orientationchange', () => setTimeout(resize, 50));
+  // iOS Safari fires this when URL bar shows/hides
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', resize);
+  }
 
   // ---------- Audio ----------
   let audioCtx = null, muted = false;
@@ -701,6 +735,7 @@
 
   const MONSTER_EMOJIS = ['👾','👹','👺','👻','👽','🤖','🐲','🦠','🎃','😈'];
   const CANNON_Y_OFFSET = 80; // distance of cannon base from bottom of canvas
+  function getGroundY() { return Math.max(140, H - CANNON_Y_OFFSET - 130); }
 
   // ---------- Math problems ----------
   function rand(min, max) { return Math.floor(Math.random() * (max - min + 1)) + min; }
@@ -788,8 +823,10 @@
     const prob = makeProblem();
     const size = 64;
     const x = rand(size + 10, W - size - 10);
-    const groundY = H - CANNON_Y_OFFSET - 130;
-    const startY = 50;             // spawn inside visible area so question is visible immediately
+    // groundY scales down on tight viewports so the monster never spawns
+    // below where it should stop (small landscape phones).
+    const groundY = getGroundY();
+    const startY = Math.min(50, groundY - 80);
     // 10 seconds from spawn to groundY
     const vy = (groundY - startY) / MONSTER_FALL_TIME;
     const m = {
@@ -1003,7 +1040,7 @@
     updateHUD();
 
     // monsters
-    const groundY = H - CANNON_Y_OFFSET - 130;
+    const groundY = getGroundY();
     for (const m of state.monsters) {
       if (!m.alive) continue;
       if (!m.stuck) {
@@ -1442,7 +1479,7 @@
     drawStars();
 
     // ground line
-    const groundY = H - CANNON_Y_OFFSET - 130;
+    const groundY = getGroundY();
     ctx.strokeStyle = 'rgba(239,68,68,.4)';
     ctx.setLineDash([8, 8]);
     ctx.lineWidth = 2;
