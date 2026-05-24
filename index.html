@@ -207,6 +207,7 @@
           <button class="chip active" data-op="-">減法</button>
           <button class="chip active" data-op="×">乘法</button>
           <button class="chip" data-op="÷">除法</button>
+          <button class="chip" data-op="注音">注音</button>
         </div>
       </div>
 
@@ -478,9 +479,43 @@
     }
   };
 
+  // ---------- 語音（注音題唸出國字） ----------
+  let _zhVoice = null;
+  function pickZhVoice() {
+    if (!('speechSynthesis' in window)) return null;
+    const voices = speechSynthesis.getVoices();
+    if (!voices.length) return null;
+    // 偏好 zh-TW，退而求其次 zh-HK / zh-CN
+    return voices.find(v => /zh[-_]TW/i.test(v.lang)) ||
+           voices.find(v => /zh[-_]HK/i.test(v.lang)) ||
+           voices.find(v => /zh/i.test(v.lang)) ||
+           null;
+  }
+  if ('speechSynthesis' in window) {
+    speechSynthesis.onvoiceschanged = () => { _zhVoice = pickZhVoice(); };
+    _zhVoice = pickZhVoice();
+  }
+  function speakChar(text) {
+    if (muted || !('speechSynthesis' in window)) return;
+    try { speechSynthesis.cancel(); } catch (e) {}
+    const utt = new SpeechSynthesisUtterance(text);
+    utt.lang = 'zh-TW';
+    utt.rate = 0.85;
+    utt.pitch = 1.05;
+    utt.volume = 1.0;
+    if (_zhVoice) utt.voice = _zhVoice;
+    speechSynthesis.speak(utt);
+  }
+  function stopSpeech() {
+    if ('speechSynthesis' in window) {
+      try { speechSynthesis.cancel(); } catch (e) {}
+    }
+  }
+
   document.getElementById('muteBtn').addEventListener('click', e => {
     muted = !muted;
     e.currentTarget.textContent = muted ? '🔇' : '🔊';
+    if (muted) stopSpeech();
   });
   document.getElementById('endBtn').addEventListener('click', () => {
     if (state.running) endGame();
@@ -534,6 +569,83 @@
     return { points, speedBonus, comboMult };
   }
 
+  // ---------- 國字注音字庫 ----------
+  // 格式: [字, 畫數, 注音]。注音裡的 ˊ ˇ ˋ ˙ 是聲調，不算 zhuyin 符號數
+  const CHAR_DATA = [
+    // ===== 1-2 畫 =====
+    ['一',1,'ㄧ'],['二',2,'ㄦˋ'],['七',2,'ㄑㄧ'],['十',2,'ㄕˊ'],['八',2,'ㄅㄚ'],
+    ['力',2,'ㄌㄧˋ'],['刀',2,'ㄉㄠ'],['入',2,'ㄖㄨˋ'],['人',2,'ㄖㄣˊ'],
+    // ===== 3 畫 =====
+    ['三',3,'ㄙㄢ'],['上',3,'ㄕㄤˋ'],['大',3,'ㄉㄚˋ'],['山',3,'ㄕㄢ'],['子',3,'ㄗˇ'],
+    ['口',3,'ㄎㄡˇ'],['也',3,'ㄧㄝˇ'],['已',3,'ㄧˇ'],['之',3,'ㄓ'],['凡',3,'ㄈㄢˊ'],
+    // ===== 4 畫 =====
+    ['五',4,'ㄨˇ'],['分',4,'ㄈㄣ'],['友',4,'ㄧㄡˇ'],['反',4,'ㄈㄢˇ'],['太',4,'ㄊㄞˋ'],
+    ['夫',4,'ㄈㄨ'],['手',4,'ㄕㄡˇ'],['文',4,'ㄨㄣˊ'],['斗',4,'ㄉㄡˇ'],['方',4,'ㄈㄤ'],
+    ['日',4,'ㄖˋ'],['月',4,'ㄩㄝˋ'],['木',4,'ㄇㄨˋ'],['比',4,'ㄅㄧˇ'],['毛',4,'ㄇㄠˊ'],
+    ['父',4,'ㄈㄨˋ'],['牙',4,'ㄧㄚˊ'],['王',4,'ㄨㄤˊ'],['巴',4,'ㄅㄚ'],['不',4,'ㄅㄨˋ'],
+    // ===== 5 畫 =====
+    ['主',5,'ㄓㄨˇ'],['句',5,'ㄐㄩˋ'],['古',5,'ㄍㄨˇ'],['右',5,'ㄧㄡˋ'],['司',5,'ㄙ'],
+    ['史',5,'ㄕˇ'],['失',5,'ㄕ'],['巨',5,'ㄐㄩˋ'],['用',5,'ㄩㄥˋ'],['由',5,'ㄧㄡˊ'],
+    ['它',5,'ㄊㄚ'],['末',5,'ㄇㄛˋ'],['本',5,'ㄅㄣˇ'],['北',5,'ㄅㄟˇ'],['半',5,'ㄅㄢˋ'],
+    ['卡',5,'ㄎㄚˇ'],['包',5,'ㄅㄠ'],['母',5,'ㄇㄨˇ'],['永',5,'ㄩㄥˇ'],['玉',5,'ㄩˋ'],
+    ['白',5,'ㄅㄞˊ'],['皮',5,'ㄆㄧˊ'],['目',5,'ㄇㄨˋ'],['矛',5,'ㄇㄠˊ'],['立',5,'ㄌㄧˋ'],
+    // ===== 6 畫 =====
+    ['米',6,'ㄇㄧˇ'],['羊',6,'ㄧㄤˊ'],['自',6,'ㄗˋ'],['西',6,'ㄒㄧ'],['而',6,'ㄦˊ'],
+    ['耳',6,'ㄦˇ'],['肉',6,'ㄖㄡˋ'],['至',6,'ㄓˋ'],['色',6,'ㄙㄜˋ'],['衣',6,'ㄧ'],
+    ['早',6,'ㄗㄠˇ'],['老',6,'ㄌㄠˇ'],['字',6,'ㄗˋ'],['安',6,'ㄢ'],['守',6,'ㄕㄡˇ'],
+    // ===== 7 畫 =====
+    ['池',7,'ㄔˊ'],['步',7,'ㄅㄨˋ'],['我',7,'ㄨㄛˇ'],['那',7,'ㄋㄚˋ'],['你',7,'ㄋㄧˇ'],
+    ['完',7,'ㄨㄢˊ'],['弟',7,'ㄉㄧˋ'],['走',7,'ㄗㄡˇ'],['足',7,'ㄗㄨˊ'],['車',7,'ㄔㄜ'],
+    ['言',7,'ㄧㄢˊ'],['貝',7,'ㄅㄟˋ'],['谷',7,'ㄍㄨˇ'],
+    // ===== 8 畫 =====
+    ['來',8,'ㄌㄞˊ'],['兒',8,'ㄦˊ'],['法',8,'ㄈㄚˇ'],['知',8,'ㄓ'],['直',8,'ㄓˊ'],
+    ['牧',8,'ㄇㄨˋ'],['朋',8,'ㄆㄥˊ'],['雨',8,'ㄩˇ'],['長',8,'ㄔㄤˊ'],['河',8,'ㄏㄜˊ'],
+    ['拍',8,'ㄆㄞ'],['抱',8,'ㄅㄠˋ'],['拉',8,'ㄌㄚ'],['妹',8,'ㄇㄟˋ'],['妻',8,'ㄑㄧ'],
+    // ===== 9-14 畫 (普通) =====
+    ['春',9,'ㄔㄨㄣ'],['秋',9,'ㄑㄧㄡ'],['風',9,'ㄈㄥ'],['飛',9,'ㄈㄟ'],['紅',9,'ㄏㄨㄥˊ'],
+    ['美',9,'ㄇㄟˇ'],['看',9,'ㄎㄢˋ'],['前',9,'ㄑㄧㄢˊ'],['後',9,'ㄏㄡˋ'],['星',9,'ㄒㄧㄥ'],
+    ['哥',10,'ㄍㄜ'],['馬',10,'ㄇㄚˇ'],['高',10,'ㄍㄠ'],['草',10,'ㄘㄠˇ'],['倒',10,'ㄉㄠˇ'],
+    ['笑',10,'ㄒㄧㄠˋ'],['班',10,'ㄅㄢ'],['書',10,'ㄕㄨ'],['茶',10,'ㄔㄚˊ'],['家',10,'ㄐㄧㄚ'],
+    ['鳥',11,'ㄋㄧㄠˇ'],['國',11,'ㄍㄨㄛˊ'],['球',11,'ㄑㄧㄡˊ'],['魚',11,'ㄩˊ'],['動',11,'ㄉㄨㄥˋ'],
+    ['強',11,'ㄑㄧㄤˊ'],['教',11,'ㄐㄧㄠˋ'],['雪',11,'ㄒㄩㄝˇ'],['船',11,'ㄔㄨㄢˊ'],['雀',11,'ㄑㄩㄝˋ'],
+    ['開',12,'ㄎㄞ'],['短',12,'ㄉㄨㄢˇ'],['飯',12,'ㄈㄢˋ'],['黑',12,'ㄏㄟ'],['黃',12,'ㄏㄨㄤˊ'],
+    ['街',12,'ㄐㄧㄝ'],['跑',12,'ㄆㄠˇ'],['過',12,'ㄍㄨㄛˋ'],['湖',12,'ㄏㄨˊ'],['椅',12,'ㄧˇ'],
+    ['跳',13,'ㄊㄧㄠˋ'],['路',13,'ㄌㄨˋ'],['滑',13,'ㄏㄨㄚˊ'],['想',13,'ㄒㄧㄤˇ'],['愛',13,'ㄞˋ'],
+    ['群',13,'ㄑㄩㄣˊ'],['暗',13,'ㄢˋ'],['鼓',13,'ㄍㄨˇ'],['福',13,'ㄈㄨˊ'],['跟',13,'ㄍㄣ'],
+    ['對',14,'ㄉㄨㄟˋ'],['像',14,'ㄒㄧㄤˋ'],['漂',14,'ㄆㄧㄠ'],['銀',14,'ㄧㄣˊ'],['慢',14,'ㄇㄢˋ'],
+    ['圖',14,'ㄊㄨˊ'],['歌',14,'ㄍㄜ'],['遠',14,'ㄩㄢˇ'],
+    // ===== 15+ 畫 (困難) =====
+    ['樂',15,'ㄌㄜˋ'],['蝴',15,'ㄏㄨˊ'],['寬',15,'ㄎㄨㄢ'],['練',15,'ㄌㄧㄢˋ'],['廠',15,'ㄔㄤˇ'],
+    ['樣',15,'ㄧㄤˋ'],['數',15,'ㄕㄨˋ'],['課',15,'ㄎㄜˋ'],['慶',15,'ㄑㄧㄥˋ'],['廚',15,'ㄔㄨˊ'],
+    ['質',15,'ㄓˋ'],['膠',15,'ㄐㄧㄠ'],['輪',15,'ㄌㄨㄣˊ'],
+    ['學',16,'ㄒㄩㄝˊ'],['樹',16,'ㄕㄨˋ'],['機',16,'ㄐㄧ'],['龍',16,'ㄌㄨㄥˊ'],['親',16,'ㄑㄧㄣ'],
+    ['醒',16,'ㄒㄧㄥˇ'],['鋼',16,'ㄍㄤ'],['戰',16,'ㄓㄢˋ'],['燈',16,'ㄉㄥ'],['橋',16,'ㄑㄧㄠˊ'],
+    ['講',17,'ㄐㄧㄤˇ'],['聲',17,'ㄕㄥ'],['還',17,'ㄏㄞˊ'],['點',17,'ㄉㄧㄢˇ'],['應',17,'ㄧㄥ'],
+    ['謝',17,'ㄒㄧㄝˋ'],['幫',17,'ㄅㄤ'],
+    ['雞',18,'ㄐㄧ'],['醫',18,'ㄧ'],['簡',18,'ㄐㄧㄢˇ'],['雜',18,'ㄗㄚˊ'],['雙',18,'ㄕㄨㄤ'],
+    ['題',18,'ㄊㄧˊ'],['獸',19,'ㄕㄡˋ'],['鏡',19,'ㄐㄧㄥˋ'],['警',19,'ㄐㄧㄥˇ'],
+    ['麵',20,'ㄇㄧㄢˋ'],['議',20,'ㄧˋ'],['寶',20,'ㄅㄠˇ'],['籃',20,'ㄌㄢˊ'],['蘋',20,'ㄆㄧㄥˊ'],
+    ['飄',20,'ㄆㄧㄠ'],['競',20,'ㄐㄧㄥˋ'],['爐',20,'ㄌㄨˊ'],['蘿',22,'ㄌㄨㄛˊ'],
+  ];
+
+  // count zhuyin symbols, ignoring tone marks
+  function zhuyinSymbolCount(z) {
+    let n = 0;
+    for (const ch of z) {
+      const code = ch.charCodeAt(0);
+      if (code >= 0x3105 && code <= 0x312F) n++;
+    }
+    return n;
+  }
+
+  function charPool(diff) {
+    return CHAR_DATA.filter(([c, s, z]) => {
+      if (diff === 'easy')   return s <= 8 && zhuyinSymbolCount(z) <= 2;
+      if (diff === 'normal') return s >= 9 && s <= 14;
+      return s >= 15;
+    });
+  }
+
   const MONSTER_EMOJIS = ['👾','👹','👺','👻','👽','🤖','🐲','🦠','🎃','😈'];
   const CANNON_Y_OFFSET = 80; // distance of cannon base from bottom of canvas
 
@@ -543,9 +655,16 @@
 
   function makeProblem() {
     const op = pick(state.operations);
-    let a, b, ans;
     const d = state.difficulty;
 
+    // ---- 注音題：從字庫挑一個字，答案 = 注音 ----
+    if (op === '注音') {
+      const pool = charPool(d);
+      const [ch, , zy] = pool[Math.floor(Math.random() * pool.length)];
+      return { op: '注音', char: ch, ans: zy };
+    }
+
+    let a, b, ans;
     if (op === '+') {
       // 簡單：個位數 (1-9 + 1-9)；普通：20 以內；困難：100 以內
       const cap = d === 'easy' ? 9 : d === 'normal' ? 20 : 100;
@@ -580,8 +699,26 @@
     return { a, b, op, ans };
   }
 
-  function makeChoices(correct) {
-    // generate 3 unique choices, one being the correct answer
+  function makeChoices(prob) {
+    // 注音：從同難度字庫挑兩個不同的注音做為干擾項
+    if (prob.op === '注音') {
+      const pool = charPool(state.difficulty).filter(([, , z]) => z !== prob.ans);
+      const distractors = [];
+      const usedIdx = new Set();
+      while (distractors.length < 2 && usedIdx.size < pool.length) {
+        const i = Math.floor(Math.random() * pool.length);
+        if (usedIdx.has(i)) continue;
+        usedIdx.add(i);
+        const z = pool[i][2];
+        if (!distractors.includes(z)) distractors.push(z);
+      }
+      while (distractors.length < 2) distractors.push(prob.ans + '?'); // 字庫太小的保險
+      const arr = [prob.ans, ...distractors].sort(() => Math.random() - 0.5);
+      return { choices: arr, correctIdx: arr.indexOf(prob.ans) };
+    }
+
+    // 數字題：用 ±delta 抖動產生干擾項
+    const correct = prob.ans;
     const set = new Set([correct]);
     while (set.size < 3) {
       let delta = rand(1, Math.max(3, Math.floor(correct * 0.4) + 2));
@@ -616,6 +753,7 @@
     };
     state.monsters.push(m);
     pickTarget();
+    if (prob.op === '注音') speakChar(prob.char);
   }
 
   function pickTarget() {
@@ -627,7 +765,7 @@
     }
     state.targetMonster = lowest;
     if (lowest) {
-      const c = makeChoices(lowest.problem.ans);
+      const c = makeChoices(lowest.problem);
       state.choices = c.choices;
       state.correctIdx = c.correctIdx;
       renderAnswers();
@@ -641,7 +779,11 @@
   function renderAnswers() {
     const btns = document.querySelectorAll('.ans-btn');
     btns.forEach((b, i) => {
-      b.textContent = state.choices[i];
+      const v = state.choices[i];
+      b.textContent = v;
+      // shrink font for long strings (notably 3-zhuyin + tone)
+      const len = String(v).length;
+      b.style.fontSize = len >= 4 ? '30px' : '38px';
       b.classList.remove('correct', 'wrong');
       b.disabled = state.correctIdx < 0;
     });
@@ -746,6 +888,10 @@
       } else {
         btn.classList.add('wrong');
         sfx.wrong();
+        // 注音題答錯：再唸一次正確字音
+        if (target.problem.op === '注音') {
+          setTimeout(() => speakChar(target.problem.char), 250);
+        }
         state.combo = 0;
         state.wrongStreak++;
         const mult    = Math.min(state.wrongStreak, WRONG_STREAK_CAP);
@@ -1134,25 +1280,43 @@
 
   function drawMonster(m) {
     const bob = Math.sin(m.wobble) * 4;
+    const isZhuyin = m.problem.op === '注音';
     ctx.save();
     // glow if targeted
     if (m === state.targetMonster) {
-      ctx.shadowColor = '#fde047';
+      ctx.shadowColor = isZhuyin ? '#a855f7' : '#fde047';
       ctx.shadowBlur = 30;
-      ctx.fillStyle = 'rgba(253,224,71,.15)';
+      ctx.fillStyle = isZhuyin ? 'rgba(168,85,247,.15)' : 'rgba(253,224,71,.15)';
       ctx.beginPath();
       ctx.arc(m.x, m.y + bob, m.size * 0.75, 0, Math.PI * 2);
       ctx.fill();
     }
-    // emoji body
     ctx.shadowBlur = 0;
-    ctx.font = `${m.size}px sans-serif`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(m.emoji, m.x, m.y + bob);
+
+    if (isZhuyin) {
+      // 國字當作怪物身體 — 金黃描邊 + 發光，看起來像「字符魔物」
+      const fontSize = Math.round(m.size * 1.05);
+      ctx.font = `900 ${fontSize}px "PingFang TC", "Microsoft JhengHei", "Heiti TC", system-ui, sans-serif`;
+      ctx.lineWidth = 6;
+      ctx.strokeStyle = '#7c2d12';
+      ctx.shadowColor = '#fbbf24';
+      ctx.shadowBlur = 18;
+      ctx.strokeText(m.problem.char, m.x, m.y + bob);
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = '#fde047';
+      ctx.fillText(m.problem.char, m.x, m.y + bob);
+    } else {
+      ctx.font = `${m.size}px sans-serif`;
+      ctx.fillText(m.emoji, m.x, m.y + bob);
+    }
     ctx.restore();
 
-    // ---- question label "standing under" the monster's feet ----
+    // ---- 注音題：字本身就是題目，不畫腳下題目板 ----
+    if (isZhuyin) return;
+
+    // ---- 數學題：腳下題目板 ----
     const p = m.problem;
     const text = `${p.a} ${p.op} ${p.b} = ?`;
     ctx.font = 'bold 26px "Menlo", "Courier New", monospace';
@@ -1333,6 +1497,7 @@
     if (!state.running) return;
     state.running = false;
     music.stop();
+    stopSpeech();
 
     // high score handling (best = total score)
     const isNew = state.score > 0 && state.score > state.bestScore;
