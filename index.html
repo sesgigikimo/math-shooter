@@ -164,8 +164,16 @@
     border-color: #fff; background: radial-gradient(circle, #fff 35%, transparent 40%);
   }
 
+  .bonus-info {
+    font-size: 16px; font-weight: 700; color: #fde047;
+    margin: 4px 0 18px; padding: 8px 18px;
+    background: rgba(253,224,71,.1); border: 1px solid rgba(253,224,71,.35);
+    border-radius: 999px; letter-spacing: .5px;
+  }
+  .bonus-info b { color: #fff; }
+
   .start-btn {
-    margin-top: 12px;
+    margin-top: 4px;
     padding: 18px 56px; font-size: 28px; font-weight: 800;
     background: linear-gradient(180deg, #4ade80 0%, #16a34a 100%);
     color: #052e16; border: none; border-radius: 20px;
@@ -294,6 +302,8 @@
           <button class="chip" data-diff="hard">困難</button>
         </div>
       </div>
+
+      <div class="bonus-info" id="bonusInfo">本場得分加成：難度 ×1.5 · 題型 ×1.2 · 合計 ×1.8</div>
 
       <button class="start-btn" id="startBtn">開始遊戲</button>
     </div>
@@ -615,8 +625,13 @@
   // scoring
   const BASE_POINTS  = 10;      // every correct answer
   const SPEED_WINDOW = 10;      // seconds; faster = bigger speed bonus
-  const WRONG_PENALTY = 5;      // base deduction per wrong answer
-  const WRONG_STREAK_CAP = 4;   // max multiplier on consecutive wrongs
+  const SPEED_BONUS_MULT = 2;   // 加重速度獎勵（1秒內+20、5秒+10、10秒0）
+  const WRONG_PENALTY = 10;     // base deduction per wrong answer（加重）
+  const WRONG_STREAK_CAP = 5;   // max multiplier on consecutive wrongs（-10/-20/-30/-40/-50）
+  // 難度加成：越難得分倍率越高
+  const DIFFICULTY_MULT = { easy: 1.0, normal: 1.5, hard: 2.0 };
+  // 題型多元加成：勾選越多種題型，倍率越高
+  function varietyMultiplier(n) { return 1 + Math.max(0, n - 1) * 0.1; }
 
   const state = {
     running: false,
@@ -633,6 +648,8 @@
     timeLeft: TOTAL_TIME,  // seconds remaining
     operations: ['+', '-', '×'],
     difficulty: 'normal',
+    difficultyMult: 1,     // 難度加成（開場計算）
+    varietyMult: 1,        // 題型多元加成（開場計算）
     lastTime: 0,
     targetMonster: null,
     choices: [],
@@ -649,10 +666,13 @@
   loadBest();
 
   // Score calculation. Returns { points, speedBonus, comboMult }.
+  // 公式: (基礎 + 速度加成) × 連擊倍數 × 難度倍率 × 題型倍率
   function scoreFor(elapsedSec, comboAfter) {
-    const speedBonus = Math.max(0, Math.round(SPEED_WINDOW - elapsedSec));
+    const speedBonus = Math.max(0, Math.round((SPEED_WINDOW - elapsedSec) * SPEED_BONUS_MULT));
     const comboMult  = Math.min(3, 1 + Math.max(0, comboAfter - 1) * 0.2);
-    const points = Math.round((BASE_POINTS + speedBonus) * comboMult);
+    const points = Math.round(
+      (BASE_POINTS + speedBonus) * comboMult * state.difficultyMult * state.varietyMult
+    );
     return { points, speedBonus, comboMult };
   }
 
@@ -727,8 +747,8 @@
 
   function charPool(diff) {
     return CHAR_DATA.filter(([c, s, z]) => {
-      if (diff === 'easy')   return s <= 8 && zhuyinSymbolCount(z) <= 2;
-      if (diff === 'normal') return s >= 9 && s <= 14;
+      if (diff === 'easy')   return s <= 6 && zhuyinSymbolCount(z) <= 2;
+      if (diff === 'normal') return s >= 7 && s <= 14;
       return s >= 15;
     });
   }
@@ -754,34 +774,35 @@
 
     let a, b, ans;
     if (op === '+') {
-      // 簡單：個位數 (1-9 + 1-9)；普通：20 以內；困難：100 以內
-      const cap = d === 'easy' ? 9 : d === 'normal' ? 20 : 100;
-      if (d === 'easy') { a = rand(1, 9); b = rand(1, 9); }
-      else { a = rand(1, cap - 1); b = rand(1, cap - a); }
+      // 簡單：和≤10不進位；普通：和≤20；困難：兩位數+兩位數（和≤100、必進位）
+      if (d === 'easy')        { a = rand(1, 5);  b = rand(1, 5); }
+      else if (d === 'normal') { a = rand(1, 19); b = rand(1, 20 - a); }
+      else                     { a = rand(10, 89); b = rand(10, 100 - a); }
       ans = a + b;
     } else if (op === '-') {
-      // 簡單：個位數差；普通：20 以內；困難：100 以內。結果不為負
-      const cap = d === 'easy' ? 9 : d === 'normal' ? 20 : 100;
-      a = rand(2, cap); b = rand(1, a);
+      // 簡單：被減數≤10；普通：≤20；困難：兩位數-兩位數。結果不為負
+      if (d === 'easy')        { a = rand(2, 10); b = rand(1, a); }
+      else if (d === 'normal') { a = rand(2, 20); b = rand(1, a); }
+      else                     { a = rand(20, 99); b = rand(10, a); }
       ans = a - b;
     } else if (op === '×') {
-      // 簡單：1-5 × 1-5；普通：1-5 × 1-9（隨機哪邊小）；困難：1-9 × 1-9
-      if (d === 'easy')   { a = rand(1, 5); b = rand(1, 5); }
+      // 簡單：1-3 × 1-5；普通：1-5 × 1-9；困難：2-9 × 2-9（排除 ×1 的送分題）
+      if (d === 'easy')        { a = rand(1, 3); b = rand(1, 5); }
       else if (d === 'normal') {
         if (Math.random() < 0.5) { a = rand(1, 5); b = rand(1, 9); }
         else                     { a = rand(1, 9); b = rand(1, 5); }
       }
-      else                { a = rand(1, 9); b = rand(1, 9); }
+      else                     { a = rand(2, 9); b = rand(2, 9); }
       ans = a * b;
     } else { // ÷
       // 對應乘法的逆運算（保證整除）
       let f1, f2;
-      if (d === 'easy')   { f1 = rand(1, 5); f2 = rand(1, 5); }
+      if (d === 'easy')        { f1 = rand(1, 3); f2 = rand(1, 5); }
       else if (d === 'normal') {
         if (Math.random() < 0.5) { f1 = rand(1, 5); f2 = rand(1, 9); }
         else                     { f1 = rand(1, 9); f2 = rand(1, 5); }
       }
-      else                { f1 = rand(1, 9); f2 = rand(1, 9); }
+      else                     { f1 = rand(2, 9); f2 = rand(2, 9); }
       a = f1 * f2; b = f1; ans = f2;
     }
     return { a, b, op, ans };
@@ -1583,6 +1604,9 @@
     state.timeLeft = TOTAL_TIME;
 
     if (state.operations.length === 0) state.operations = ['+'];
+    // 本場加成（整場固定）
+    state.difficultyMult = DIFFICULTY_MULT[state.difficulty] || 1;
+    state.varietyMult    = varietyMultiplier(state.operations.length);
 
     document.getElementById('startScreen').classList.add('hidden');
     document.getElementById('overScreen').classList.add('hidden');
@@ -1625,19 +1649,31 @@
   }
 
   // ---------- Config chips ----------
+  function updateBonusInfo() {
+    const opCount = document.querySelectorAll('#opChips .chip.active').length;
+    const diff = (document.querySelector('#diffChips .chip.active') || {}).dataset?.diff || 'normal';
+    const dm = DIFFICULTY_MULT[diff] || 1;
+    const vm = varietyMultiplier(opCount);
+    const total = dm * vm;
+    document.getElementById('bonusInfo').innerHTML =
+      `本場得分加成：難度 <b>×${dm.toFixed(1)}</b> · 題型 <b>×${vm.toFixed(1)}</b> · 合計 <b>×${total.toFixed(1)}</b>`;
+  }
   document.querySelectorAll('#opChips .chip').forEach(chip => {
     chip.addEventListener('click', () => {
       chip.classList.toggle('active');
       const active = Array.from(document.querySelectorAll('#opChips .chip.active'));
       if (active.length === 0) chip.classList.add('active'); // keep at least one
+      updateBonusInfo();
     });
   });
   document.querySelectorAll('#diffChips .chip').forEach(chip => {
     chip.addEventListener('click', () => {
       document.querySelectorAll('#diffChips .chip').forEach(c => c.classList.remove('active'));
       chip.classList.add('active');
+      updateBonusInfo();
     });
   });
+  updateBonusInfo();
 
   document.getElementById('startBtn').addEventListener('click', () => {
     state.operations = Array.from(document.querySelectorAll('#opChips .chip.active')).map(c => c.dataset.op);
